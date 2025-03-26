@@ -1,0 +1,3 @@
+beans
+
+The tool I use to generate mkosi-kernel environments or "beans" to enable easily creating and using many different mkosi configurations at the same time.
