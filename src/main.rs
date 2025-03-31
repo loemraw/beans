@@ -324,14 +324,12 @@ fn save_bean_config(bean_dir: &std::path::PathBuf, bean_config: &BeanConfig) -> 
 }
 
 fn read_bean_config(bean_dir: &std::path::PathBuf) -> Result<BeanConfig> {
-    Ok(toml::from_str(&std::fs::read_to_string(bean_dir.join(BEAN_CONFIG))?)?)
+    Ok(toml::from_str(&std::fs::read_to_string(
+        bean_dir.join(BEAN_CONFIG),
+    )?)?)
 }
 
-fn sync_bean_helper(
-    sync: bool,
-    bean_dir: &std::path::PathBuf,
-    module_name: &str,
-) -> Result<bool> {
+fn sync_bean_helper(sync: bool, bean_dir: &std::path::PathBuf, module_name: &str) -> Result<bool> {
     let module_dir = bean_dir.join(module_name);
     if !module_dir.exists() {
         return Ok(false);
@@ -341,7 +339,8 @@ fn sync_bean_helper(
             println!("--- syncing module {} ---", module_name);
             Command::new("git")
                 .current_dir(&module_dir)
-                .arg("pull")
+                .arg("reset")
+                .arg("--hard")
                 .status()?;
             Ok(true)
         }
@@ -467,6 +466,8 @@ fn main() {
                     mkosi_args.insert(0, format!("--profile={}", mkosi_kernel_profile));
                 }
             }
+
+            println!("{:?}", mkosi_args);
 
             if let Some(mkosi_kernel_dir) = bean_config.mkosi_kernel_path {
                 Command::new("mkosi")
