@@ -1,7 +1,10 @@
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use dirs::config_dir;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
+use std::path::PathBuf;
 use std::process::Command;
 use std::{
     fs::create_dir_all,
@@ -9,8 +12,8 @@ use std::{
 };
 
 static FORBIDDEN_CHARS: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+static BEAN_CONFIG: &str = "config.toml";
 static MKOSI_KERNEL: &str = "mkosi-kernel";
-static MKOSI_KERNEL_PROFILE: &str = ".mkosi-profile";
 static MKOSI_KERNEL_PROFILES_DIR: &str = "mkosi.profiles";
 static LINUX: &str = "linux";
 static BTRFS_PROGS: &str = "btrfs-progs";
@@ -131,10 +134,33 @@ enum Commands {
     },
 }
 
+#[derive(Serialize, Deserialize)]
+struct BeanConfig {
+    name: String,
+    mkosi_kernel_profile: Option<String>,
+    mkosi_kernel_path: Option<PathBuf>,
+    linux_path: Option<PathBuf>,
+    btrfs_progs_path: Option<PathBuf>,
+    fstest_path: Option<PathBuf>,
+}
+
+impl BeanConfig {
+    fn new(name: &str) -> Self {
+        BeanConfig {
+            name: name.to_owned(),
+            mkosi_kernel_profile: None,
+            mkosi_kernel_path: None,
+            linux_path: None,
+            btrfs_progs_path: None,
+            fstest_path: None,
+        }
+    }
+}
+
 fn create_new_bean(
     beans_config_dir: &std::path::PathBuf,
     name: &str,
-) -> std::io::Result<std::path::PathBuf> {
+) -> Result<std::path::PathBuf> {
     println!(
         "--- setting up new bean {:?} at {:?} ---",
         name, beans_config_dir
@@ -143,15 +169,17 @@ fn create_new_bean(
         Err(Error::new(
             ErrorKind::InvalidInput,
             "profile name contains invalid characters",
-        ))
+        )
+        .into())
     } else {
         let mut bean_dir = beans_config_dir.clone();
         bean_dir.push(name);
-        create_dir_all(&bean_dir).map(|_| bean_dir)
+        create_dir_all(&bean_dir)?;
+        Ok(bean_dir)
     }
 }
 
-fn list_beans(beans_config_dir: &std::path::PathBuf) -> std::io::Result<()> {
+fn list_beans(beans_config_dir: &std::path::PathBuf) -> Result<()> {
     println!("--- listing beans ---");
 
     let read_dir = beans_config_dir.read_dir()?;
@@ -173,7 +201,7 @@ fn git_clone_module_to_bean(
     module_dir: &std::path::PathBuf,
     module_name: &str,
     module_branch: &str,
-) -> std::io::Result<std::process::ExitStatus> {
+) -> Result<()> {
     println!(
         "--- cloning {:?} on branch {} ---",
         module_dir, module_branch
@@ -193,23 +221,24 @@ fn git_clone_module_to_bean(
         .arg("-C")
         .arg("tracker")
         .arg(&format!("origin/{}", module_branch))
-        .status()
+        .status()?;
+
+    Ok(())
 }
 
-fn list_module_git_branches(
-    module_dir: &std::path::PathBuf,
-) -> std::io::Result<std::process::ExitStatus> {
+fn list_module_git_branches(module_dir: &std::path::PathBuf) -> Result<()> {
     Command::new("git")
         .current_dir(&module_dir)
         .arg("branch")
         .arg("-v")
-        .status()
+        .status()?;
+    Ok(())
 }
 
 fn interactively_configure_module_branch(
     module_dir: &std::path::PathBuf,
     module_name: &str,
-) -> std::io::Result<Option<String>> {
+) -> Result<Option<String>> {
     println!("\n--- setting up {:?} module ---", module_name);
     println!("\nwould you like to configure this module?  [Y/n]");
     let mut buf = String::new();
@@ -227,7 +256,7 @@ fn interactively_configure_module_branch(
     }
 }
 
-fn list_mkosi_profiles(mkosi_kernel_dir: &std::path::PathBuf) -> std::io::Result<()> {
+fn list_mkosi_profiles(mkosi_kernel_dir: &std::path::PathBuf) -> Result<()> {
     let mkosi_kernel_profiles_dir = mkosi_kernel_dir.join(MKOSI_KERNEL_PROFILES_DIR);
     mkosi_kernel_profiles_dir.read_dir()?.for_each(|path| {
         if let Ok(path) = path {
@@ -244,7 +273,7 @@ fn list_mkosi_profiles(mkosi_kernel_dir: &std::path::PathBuf) -> std::io::Result
 
 fn interactively_get_mkosi_profile(
     mkosi_kernel_dir: &std::path::PathBuf,
-) -> std::io::Result<Option<String>> {
+) -> Result<Option<String>> {
     println!("\nwould you like to set a specific mkosi profile?  [Y/n]");
     let mut buf = String::new();
     io::stdin().read_line(&mut buf)?;
@@ -261,54 +290,48 @@ fn interactively_get_mkosi_profile(
     }
 }
 
-fn configure_bean_helper(
+fn configure_bean_module(
     interactive: &bool,
     bean_dir: &std::path::PathBuf,
     local_dir: Option<&std::path::PathBuf>,
     module_name: &str,
     local_branch: Option<&String>,
-) -> std::io::Result<()> {
+) -> Result<Option<std::path::PathBuf>> {
     match (interactive, local_dir, local_branch) {
         (true, Some(local_dir), None) => {
             if let Some(local_branch) =
                 interactively_configure_module_branch(local_dir, module_name)?
             {
-                git_clone_module_to_bean(&bean_dir, local_dir, module_name, &local_branch)
-                    .map(|_| ())
+                git_clone_module_to_bean(&bean_dir, local_dir, module_name, &local_branch)?;
+                Ok(Some(bean_dir.join(module_name)))
             } else {
-                Ok(())
+                Ok(None)
             }
         }
         (_, Some(local_dir), Some(local_branch)) => {
-            git_clone_module_to_bean(&bean_dir, local_dir, module_name, local_branch).map(|_| ())
+            git_clone_module_to_bean(&bean_dir, local_dir, module_name, local_branch)?;
+            Ok(Some(bean_dir.join(module_name)))
         }
-        (_, _, _) => Ok(()),
+        (_, _, _) => Ok(None),
     }
 }
 
-fn save_mkosi_profile_for_bean(
-    bean_dir: &std::path::PathBuf,
-    profile: &str,
-) -> std::io::Result<()> {
-    let mkosi_profile_path = bean_dir.join(MKOSI_KERNEL_PROFILE);
-    let mut mkosi_profile_file = File::create(mkosi_profile_path)?;
-    mkosi_profile_file.write(profile.as_bytes())?;
+fn save_bean_config(bean_dir: &std::path::PathBuf, bean_config: &BeanConfig) -> Result<()> {
+    let data = toml::to_string_pretty(bean_config)?;
+    let mut bean_config_file = File::create(bean_dir.join(BEAN_CONFIG))?;
+    bean_config_file.write(data.as_bytes())?;
     Ok(())
 }
 
-fn get_mkosi_profile_for_bean(bean_dir: &std::path::PathBuf) -> std::io::Result<String> {
-    let mkosi_profile_path = bean_dir.join(MKOSI_KERNEL_PROFILE);
-    let mut mkosi_profile_file = File::open(mkosi_profile_path)?;
-    let mut profile: String = String::new();
-    mkosi_profile_file.read_to_string(&mut profile)?;
-    Ok(profile)
+fn read_bean_config(bean_dir: &std::path::PathBuf) -> Result<BeanConfig> {
+    Ok(toml::from_str(&std::fs::read_to_string(bean_dir.join(BEAN_CONFIG))?)?)
 }
 
 fn sync_bean_helper(
     sync: bool,
     bean_dir: &std::path::PathBuf,
     module_name: &str,
-) -> std::io::Result<bool> {
+) -> Result<bool> {
     let module_dir = bean_dir.join(module_name);
     if !module_dir.exists() {
         return Ok(false);
@@ -319,8 +342,8 @@ fn sync_bean_helper(
             Command::new("git")
                 .current_dir(&module_dir)
                 .arg("pull")
-                .status()
-                .map(|exit_status| exit_status.success())
+                .status()?;
+            Ok(true)
         }
         (_, _) => Ok(false),
     }
@@ -342,7 +365,9 @@ fn main() {
             fstests_branch,
         } => {
             let bean_dir = create_new_bean(&beans_config_dir, &bean_name).unwrap();
-            configure_bean_helper(
+            let mut bean_config = BeanConfig::new(&bean_name);
+
+            bean_config.mkosi_kernel_path = configure_bean_module(
                 &interactive,
                 &bean_dir,
                 Some(&beans.mkosi_kernel_dir),
@@ -351,17 +376,13 @@ fn main() {
             )
             .unwrap();
 
-            if interactive {
-                if let Some(mkosi_kernel_profile) =
-                    interactively_get_mkosi_profile(&beans.mkosi_kernel_dir).unwrap()
-                {
-                    save_mkosi_profile_for_bean(&bean_dir, &mkosi_kernel_profile).unwrap();
-                }
-            } else if let Some(mkosi_kernel_profile) = mkosi_kernel_profile {
-                save_mkosi_profile_for_bean(&bean_dir, &mkosi_kernel_profile).unwrap();
-            }
+            bean_config.mkosi_kernel_profile = if interactive {
+                interactively_get_mkosi_profile(&beans.mkosi_kernel_dir).unwrap()
+            } else {
+                mkosi_kernel_profile
+            };
 
-            configure_bean_helper(
+            bean_config.linux_path = configure_bean_module(
                 &interactive,
                 &bean_dir,
                 beans.linux_dir.as_ref(),
@@ -369,7 +390,8 @@ fn main() {
                 linux_branch.as_ref(),
             )
             .unwrap();
-            configure_bean_helper(
+
+            bean_config.btrfs_progs_path = configure_bean_module(
                 &interactive,
                 &bean_dir,
                 beans.btrfs_progs_dir.as_ref(),
@@ -377,7 +399,8 @@ fn main() {
                 btrfs_progs_branch.as_ref(),
             )
             .unwrap();
-            configure_bean_helper(
+
+            bean_config.fstest_path = configure_bean_module(
                 &interactive,
                 &bean_dir,
                 beans.fstests_dir.as_ref(),
@@ -385,6 +408,8 @@ fn main() {
                 fstests_branch.as_ref(),
             )
             .unwrap();
+
+            save_bean_config(&bean_dir, &bean_config).unwrap();
         }
         Commands::Sync {
             bean_name,
@@ -415,25 +440,43 @@ fn main() {
             mut mkosi_args,
         } => {
             let bean_dir = beans_config_dir.join(&bean_name);
-            let mkosi_kernel_dir = beans_config_dir.join(&bean_name).join(MKOSI_KERNEL);
+            let bean_config = read_bean_config(&bean_dir).unwrap();
+
+            let mut build_sources = vec![];
+            if let Some(linux_path) = bean_config.linux_path {
+                build_sources.push(format!("{}:{}", linux_path.to_string_lossy(), LINUX));
+            }
+            if let Some(btrfs_progs_path) = bean_config.btrfs_progs_path {
+                build_sources.push(format!(
+                    "{}:{}",
+                    btrfs_progs_path.to_string_lossy(),
+                    BTRFS_PROGS
+                ));
+            }
+            if let Some(fstests_path) = bean_config.fstest_path {
+                build_sources.push(format!("{}:{}", fstests_path.to_string_lossy(), FSTESTS));
+            }
+            mkosi_args.insert(0, format!("--build-sources={}", build_sources.join(",")));
 
             if !no_profile {
-                if let Ok(mkosi_kernel_profile) = get_mkosi_profile_for_bean(&bean_dir) {
+                if let Some(mkosi_kernel_profile) = bean_config.mkosi_kernel_profile {
                     println!(
                         "--- using mkosi-kernel-profile {} ---",
                         mkosi_kernel_profile
                     );
-                    let mut profile_args = vec![String::from("--profile"), mkosi_kernel_profile];
-                    profile_args.extend(mkosi_args);
-                    mkosi_args = profile_args;
+                    mkosi_args.insert(0, format!("--profile={}", mkosi_kernel_profile));
                 }
             }
 
-            Command::new("mkosi")
-                .current_dir(mkosi_kernel_dir)
-                .args(mkosi_args)
-                .status()
-                .unwrap();
+            if let Some(mkosi_kernel_dir) = bean_config.mkosi_kernel_path {
+                Command::new("mkosi")
+                    .current_dir(mkosi_kernel_dir)
+                    .args(mkosi_args)
+                    .status()
+                    .unwrap();
+            } else {
+                println!("mkosi-kernel not configured for bean {}", bean_config.name);
+            }
         }
         Commands::FastFstests {
             bean_name,
