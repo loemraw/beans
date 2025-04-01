@@ -213,14 +213,20 @@ fn git_clone_module_to_bean(
         .arg(module_name)
         .status()?;
 
-    let bean_local_dir = bean_dir.join(module_name);
+    let module_dir = bean_dir.join(module_name);
 
     Command::new("git")
-        .current_dir(&bean_local_dir)
+        .current_dir(&module_dir)
         .arg("switch")
         .arg("-C")
         .arg("tracker")
         .arg(&format!("origin/{}", module_branch))
+        .status()?;
+
+    Command::new("git")
+        .current_dir(&module_dir)
+        .arg("pull")
+        .arg("--rebase")
         .status()?;
 
     Ok(())
