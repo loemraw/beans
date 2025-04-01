@@ -248,6 +248,7 @@ fn interactively_configure_module_branch(
         "y" | "" => {
             list_module_git_branches(module_dir)?;
             println!("\nwhich branch would you like to use?");
+            buf = String::new();
             io::stdin().read_line(&mut buf)?;
             Ok(Some(String::from(buf.trim())))
         }
@@ -282,6 +283,7 @@ fn interactively_get_mkosi_profile(
         "y" | "" => {
             list_mkosi_profiles(mkosi_kernel_dir)?;
             println!("\nwhich profile?");
+            buf = String::new();
             io::stdin().read_line(&mut buf)?;
             Ok(Some(String::from(buf.trim())))
         }
@@ -339,8 +341,8 @@ fn sync_bean_helper(sync: bool, bean_dir: &std::path::PathBuf, module_name: &str
             println!("--- syncing module {} ---", module_name);
             Command::new("git")
                 .current_dir(&module_dir)
-                .arg("reset")
-                .arg("--hard")
+                .arg("pull")
+                .arg("--rebase")
                 .status()?;
             Ok(true)
         }
