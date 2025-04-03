@@ -111,8 +111,12 @@ enum Commands {
         bean_name: String,
 
         /// Do not include the profile in mkosi args, included by default
-        #[arg(short, long)]
+        #[arg(short='P', long)]
         no_profile: bool,
+
+        /// Do not include the profile in mkosi args, included by default
+        #[arg(short='M', long)]
+        no_machine: bool,
 
         /// Arguments to pass down to mkosi
         #[arg(trailing_var_arg = true)]
@@ -448,6 +452,7 @@ fn main() {
         Commands::Mkosi {
             bean_name,
             no_profile,
+            no_machine,
             mut mkosi_args,
         } => {
             let bean_dir = beans_config_dir.join(&bean_name);
@@ -477,6 +482,10 @@ fn main() {
                     );
                     mkosi_args.insert(0, format!("--profile={}", mkosi_kernel_profile));
                 }
+            }
+
+            if !no_machine {
+                mkosi_args.insert(0, format!("--machine={}", bean_name));
             }
 
             println!("{:?}", mkosi_args);
