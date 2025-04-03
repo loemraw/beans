@@ -15,7 +15,7 @@ static FORBIDDEN_CHARS: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|
 static BEAN_CONFIG: &str = "config.toml";
 static MKOSI_KERNEL: &str = "mkosi-kernel";
 static MKOSI_KERNEL_PROFILES_DIR: &str = "mkosi.profiles";
-static LINUX: &str = "linux";
+static LINUX: &str = "kernel";
 static BTRFS_PROGS: &str = "btrfs-progs";
 static FSTESTS: &str = "fstests";
 
@@ -372,7 +372,11 @@ fn main() {
             fstests_branch,
         } => {
             let bean_dir = create_new_bean(&beans_config_dir, &bean_name).unwrap();
-            let mut bean_config = BeanConfig::new(&bean_name);
+            let mut bean_config = if let Ok(bean_config) = read_bean_config(&bean_dir) {
+                bean_config
+            } else {
+                BeanConfig::new(&bean_name)
+            };
 
             bean_config.mkosi_kernel_path = configure_bean_module(
                 &interactive,
